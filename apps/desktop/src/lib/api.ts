@@ -24,6 +24,20 @@ export interface SandboxConfig {
   branch?: string;
 }
 
+export interface TerminalSession {
+  id: string;
+  sandboxId: string;
+  containerId: string;
+  createdAt: number;
+}
+
+export interface CreateTerminalConfig {
+  sandboxId: string;
+  containerId: string;
+  cols?: number;
+  rows?: number;
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -90,6 +104,28 @@ class ApiClient {
   // Health check
   async checkHealth(): Promise<{ status: string; timestamp: number }> {
     return this.fetch('/health');
+  }
+
+  // Terminal API
+  async createTerminal(config: CreateTerminalConfig): Promise<{ sessionId: string }> {
+    return this.fetch<{ sessionId: string }>('/api/terminals', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
+  async listTerminals(): Promise<TerminalSession[]> {
+    return this.fetch<TerminalSession[]>('/api/terminals');
+  }
+
+  async getTerminalsBySandbox(sandboxId: string): Promise<TerminalSession[]> {
+    return this.fetch<TerminalSession[]>(`/api/terminals/sandbox/${sandboxId}`);
+  }
+
+  async closeTerminal(sessionId: string): Promise<void> {
+    return this.fetch<void>(`/api/terminals/${sessionId}`, {
+      method: 'DELETE',
+    });
   }
 }
 

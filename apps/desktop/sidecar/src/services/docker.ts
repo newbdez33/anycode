@@ -1,5 +1,8 @@
 import Docker from 'dockerode';
 import { v4 as uuid } from 'uuid';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { homedir } from 'os';
 import type { SandboxConfig, SandboxInfo } from '../types/index.js';
 import type { CredentialService } from './credentials.js';
 import { logger } from '../lib/logger.js';
@@ -17,6 +20,22 @@ export class DockerService {
   }
 
   /**
+   * Expand ~ to home directory and ensure path exists
+   */
+  private async ensureProjectPath(projectPath: string): Promise<string> {
+    // Expand ~ to home directory
+    let expandedPath = projectPath;
+    if (expandedPath.startsWith('~')) {
+      expandedPath = path.join(homedir(), expandedPath.slice(1));
+    }
+
+    // Ensure the directory exists
+    await fs.mkdir(expandedPath, { recursive: true });
+
+    return expandedPath;
+  }
+
+  /**
    * Create a new sandbox container
    */
   async createSandbox(config: SandboxConfig): Promise<SandboxInfo> {
@@ -28,7 +47,10 @@ export class DockerService {
     const sandboxId = uuid();
     const containerName = `anycode-${sandboxId.slice(0, 8)}`;
 
-    logger.info({ sandboxId, projectId: config.projectId }, 'Creating sandbox');
+    // Expand and ensure project path exists
+    const projectPath = await this.ensureProjectPath(config.projectPath);
+
+    logger.info({ sandboxId, projectId: config.projectId, projectPath }, 'Creating sandbox');
 
     // Environment variables
     const env = [
@@ -41,15 +63,24 @@ export class DockerService {
       env.push(`GIT_BRANCH=${config.branch}`);
     }
 
-    // Create container
+    // Create container with a keep-alive command
+    // The container stays running and we exec into it for terminals
+    // Override entrypoint since the image has /bin/bash as entrypoint
     const container = await this.docker.createContainer({
       Image: SANDBOX_IMAGE,
       name: containerName,
       Env: env,
+      Entrypoint: ['/bin/bash'],
+      Cmd: ['-c', 'trap "exit 0" SIGTERM; while true; do sleep 1; done'],
+      Tty: true,
+      OpenStdin: true,
       HostConfig: {
         Memory: 4 * 1024 * 1024 * 1024, // 4GB
         NanoCpus: 2_000_000_000, // 2 CPU
-        Binds: [`${config.projectPath}:/workspace:rw`],
+        Binds: [
+          `${projectPath}:/workspace:rw`,
+          `${homedir()}/.claude:/home/developer/.claude:ro`, // Mount Claude credentials (read-only)
+        ],
         SecurityOpt: ['no-new-privileges:true'],
         CapDrop: ['ALL'],
         CapAdd: ['CHOWN', 'SETUID', 'SETGID'],

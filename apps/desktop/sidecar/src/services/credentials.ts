@@ -6,7 +6,8 @@ import type { ClaudeCredentials, CredentialStatus } from '../types/index.js';
 import { logger } from '../lib/logger.js';
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
-const KEYCHAIN_ACCOUNT = 'default';
+// Account name can vary - try common patterns
+const KEYCHAIN_ACCOUNTS = ['default', process.env.USER, process.env.USERNAME, 'claude'];
 const CREDENTIAL_FILE = '.credentials.json';
 const CLAUDE_DIR = '.claude';
 const CACHE_TTL_MS = 60 * 1000; // 60 seconds
@@ -53,18 +54,26 @@ export class CredentialService {
    * Read credentials from system Keychain
    */
   private async readFromKeychain(): Promise<ClaudeCredentials | null> {
-    try {
-      const secret = await keytar.getPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
-      if (!secret) {
-        return null;
-      }
+    // Try each possible account name
+    for (const account of KEYCHAIN_ACCOUNTS) {
+      if (!account) continue;
 
-      const parsed = JSON.parse(secret);
-      return this.normalizeCredentials(parsed);
-    } catch (error) {
-      logger.debug({ error }, 'Failed to read from Keychain');
-      return null;
+      try {
+        const secret = await keytar.getPassword(KEYCHAIN_SERVICE, account);
+        if (secret) {
+          const parsed = JSON.parse(secret);
+          const credentials = this.normalizeCredentials(parsed);
+          if (credentials) {
+            logger.debug({ account }, 'Found credentials in Keychain');
+            return credentials;
+          }
+        }
+      } catch (error) {
+        logger.debug({ error, account }, 'Failed to read from Keychain');
+      }
     }
+
+    return null;
   }
 
   /**
@@ -83,10 +92,16 @@ export class CredentialService {
   }
 
   /**
-   * Normalize credential format (handle different field names)
+   * Normalize credential format (handle different field names and structures)
    */
   private normalizeCredentials(raw: Record<string, unknown>): ClaudeCredentials | null {
-    const access = (raw.access || raw.accessToken) as string | undefined;
+    // Handle nested claudeAiOauth structure
+    let data = raw;
+    if (raw.claudeAiOauth && typeof raw.claudeAiOauth === 'object') {
+      data = raw.claudeAiOauth as Record<string, unknown>;
+    }
+
+    const access = (data.access || data.accessToken) as string | undefined;
 
     if (!access) {
       return null;
@@ -94,8 +109,8 @@ export class CredentialService {
 
     return {
       access,
-      refresh: (raw.refresh || raw.refreshToken) as string | undefined,
-      expires: (raw.expires || raw.expiresAt) as number | undefined,
+      refresh: (data.refresh || data.refreshToken) as string | undefined,
+      expires: (data.expires || data.expiresAt) as number | undefined,
     };
   }
 

@@ -4,14 +4,17 @@ import websocket from '@fastify/websocket';
 import { logger } from './lib/logger.js';
 import { credentialRoutes } from './routes/credentials.js';
 import { sandboxRoutes } from './routes/sandboxes.js';
+import { terminalRoutes } from './routes/terminals.js';
 import { CredentialService } from './services/credentials.js';
 import { DockerService } from './services/docker.js';
+import { TerminalService } from './services/terminal.js';
 
 // Extend Fastify types
 declare module 'fastify' {
   interface FastifyInstance {
     credentialService: CredentialService;
     dockerService: DockerService;
+    terminalService: TerminalService;
   }
 }
 
@@ -30,14 +33,17 @@ export async function createServer() {
   // Initialize services
   const credentialService = new CredentialService();
   const dockerService = new DockerService(credentialService);
+  const terminalService = new TerminalService();
 
   // Decorate server with services
   server.decorate('credentialService', credentialService);
   server.decorate('dockerService', dockerService);
+  server.decorate('terminalService', terminalService);
 
   // Register routes
   await server.register(credentialRoutes);
   await server.register(sandboxRoutes);
+  await server.register(terminalRoutes);
 
   // Health check
   server.get('/health', async () => {
